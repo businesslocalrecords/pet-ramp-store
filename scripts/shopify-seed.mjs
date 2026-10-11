@@ -1,5 +1,5 @@
-/**
- * Shopify catalog seeder — PawGrip Pro
+﻿/**
+ * Shopify catalog seeder â€” PawGrip Pro
  * ===================================
  *
  * Creates the full premium joint-health catalog in the Shopify Admin API:
@@ -11,14 +11,14 @@
  * ---------------------------------
  * The token in .env.local is a Storefront API token (32-char hex). That API
  * is READ-ONLY for products, so it can never create them. This script uses
- * the Admin API instead, which needs its own custom-app token — see
+ * the Admin API instead, which needs its own custom-app token â€” see
  * HOW TO GET THE TOKEN below.
  *
  * HOW TO GET THE TOKEN
  * --------------------
  * Modern Shopify Dev Dashboard apps don't show you an access token at all.
  * Instead you copy the Client ID and Client secret, and this script exchanges
- * them for a 24-hour token automatically — no long-lived shpat_ token needed.
+ * them for a 24-hour token automatically â€” no long-lived shpat_ token needed.
  *
  * In the Dev Dashboard (the page that shows "PMax One-Product Storefront"):
  *   1. Settings -> Credentials -> copy the Client ID
@@ -34,10 +34,13 @@
  *   Add to .env.local:  SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_....
  *
  * REQUIRED SCOPES on the app version (the token reads back what you granted):
- *   read_products, write_products, read_collections, write_collections,
- *   read_inventory, write_inventory, read_publications, write_publications,
- *   read_locations, write_locations.
+ *   read_products, write_products, read_inventory, write_inventory,
+ *   read_publications, write_publications, read_locations, write_locations.
  *   If a scope is missing, add it in the Dev Dashboard and release a new version.
+ *
+ * OPTIONAL: read_collections, write_collections. The React storefront reads
+ * products by handle and tag, so collections are Admin-only organisation and
+ * the seeder skips them cleanly if those scopes are unavailable.
  *
  * USAGE
  * -----
@@ -60,7 +63,7 @@ const ROOT = path.resolve(__dirname, '..');
 const OUTPUT_FILE = path.join(__dirname, 'seed-output.json');
 
 /* -------------------------------------------------------------------------- */
-/* Config — loaded from .env.local                                             */
+/* Config â€” loaded from .env.local                                             */
 /* -------------------------------------------------------------------------- */
 
 function loadEnv() {
@@ -95,7 +98,7 @@ const SHOP_DOMAIN = env.VITE_SHOPIFY_STOREFRONT_DOMAIN;
  * Authentication.
  *
  * Preference order:
- *   1. SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET  (Dev Dashboard apps — the
+ *   1. SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET  (Dev Dashboard apps â€” the
  *      script exchanges them for a fresh 24h token, so nothing long-lived
  *      is ever stored on disk)
  *   2. SHOPIFY_ADMIN_ACCESS_TOKEN                 (classic custom apps)
@@ -123,7 +126,7 @@ let grantedScopes = null;
 /**
  * Exchanges the app's client credentials for a short-lived Admin API token.
  * The grant only works when the app and the store are in the same Shopify
- * organization — which they are if you created both yourself.
+ * organization â€” which they are if you created both yourself.
  */
 async function exchangeCredentials() {
   if (!CLIENT_ID || !CLIENT_SECRET) {
@@ -186,36 +189,52 @@ async function exchangeCredentials() {
 
 /** Resolves a valid Admin token, refreshing when it is close to expiry. */
 async function getToken() {
-  // Static token path — nothing to refresh
+  // Static token path â€” nothing to refresh
   if (env.SHOPIFY_ADMIN_ACCESS_TOKEN && !CLIENT_ID) {
     return env.SHOPIFY_ADMIN_ACCESS_TOKEN;
   }
-  // Client credentials path — refresh with a 60s safety margin
+  // Client credentials path â€” refresh with a 60s safety margin
   if (!ADMIN_TOKEN || Date.now() > tokenExpiresAt - 60_000) {
     await exchangeCredentials();
   }
   return ADMIN_TOKEN;
 }
 
-/** Scopes the seeder needs; used to warn when the app version is too narrow. */
+/**
+ * Scopes the seeder actually requires. Collections are deliberately NOT here:
+ * they are Admin-only organisation and the storefront reads handles + tags,
+ * so a missing collections scope is a soft skip, not a blocker.
+ */
 const REQUIRED_SCOPES = [
   'read_products', 'write_products',
-  'read_collections', 'write_collections',
   'read_inventory', 'write_inventory',
   'read_publications', 'write_publications',
   'read_locations', 'write_locations',
 ];
 
+/** Nice to have â€” the seeder works fine without them. */
+const OPTIONAL_SCOPES = ['read_collections', 'write_collections'];
+
 function reportScopes() {
   if (!grantedScopes?.length) return;
-  const missing = REQUIRED_SCOPES.filter((s) => !grantedScopes.includes(s));
+  const missingRequired = REQUIRED_SCOPES.filter((s) => !grantedScopes.includes(s));
+  const missingOptional = OPTIONAL_SCOPES.filter((s) => !grantedScopes.includes(s));
+
   console.log(`  Scopes granted: ${grantedScopes.length}`);
-  if (missing.length) {
-    warn(`Missing scopes: ${missing.join(', ')}`);
+
+  if (missingRequired.length) {
+    warn(`Missing REQUIRED scopes: ${missingRequired.join(', ')}`);
     warn('Add them in the Dev Dashboard and release a NEW APP VERSION.');
-    warn('Some steps below will fail until you do.');
+    warn('Product creation will fail until you do.');
   } else {
     ok(`All ${REQUIRED_SCOPES.length} required scopes present.`);
+  }
+
+  if (missingOptional.length) {
+    warn(`Missing optional scopes: ${missingOptional.join(', ')}`);
+    warn('Collections will be skipped â€” the storefront does not need them.');
+  } else {
+    ok('Collections scopes present â€” collections will be created.');
   }
 }
 
@@ -223,7 +242,7 @@ if (!env.SHOPIFY_ADMIN_ACCESS_TOKEN && !CLIENT_ID && !DRY_RUN && !VERIFY_ONLY) {
   console.error(`
   ERROR: no Admin API credentials in .env.local.
 
-  The Storefront token (VITE_SHOPIFY_STOREFRONT_TOKEN) CANNOT create products —
+  The Storefront token (VITE_SHOPIFY_STOREFRONT_TOKEN) CANNOT create products â€”
   that API is read-only. You need credentials for a custom app.
 
   FASTEST PATH (uses the Client ID/secret you are already looking at):
@@ -272,7 +291,7 @@ async function gql(query, variables = {}) {
     );
   }
   if (res.status === 402) {
-    throw new Error('Admin API returned 402 — your plan may not allow custom apps.');
+    throw new Error('Admin API returned 402 â€” your plan may not allow custom apps.');
   }
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${res.statusText}: ${text.slice(0, 400)}`);
@@ -363,7 +382,7 @@ const CATALOG = [
 <p>Every time your dog launches out of an SUV, the landing loads their front
 elbows with roughly <strong>4x their body weight</strong>. For a 70 lb
 Retriever, that is 280 lbs of force on joints that were never built to take
-it. Do that twice a day for five years and you do not get "old age" — you get
+it. Do that twice a day for five years and you do not get "old age" â€” you get
 early arthritis, and a vet bill that makes this ramp look very cheap.</p>
 
 <p>The <strong>PawGrip Pro Foldable Dog Car Ramp</strong> turns that impact
@@ -372,18 +391,18 @@ under their own power, and your back never gets involved.</p>
 
 <h3>Why owners switch to PawGrip Pro</h3>
 <ul>
-  <li><strong>PawGrip\u2122 Anti-Slip Tread</strong> — a proprietary textured
+  <li><strong>PawGrip\u2122 Anti-Slip Tread</strong> â€” a proprietary textured
       surface that grips nails instead of letting them skate. The single most
       common reason dogs refuse a ramp is a slick deck, and this one is not
       slick.</li>
-  <li><strong>Independently rated to 150 lbs</strong> — tested well past the
+  <li><strong>Independently rated to 150 lbs</strong> â€” tested well past the
       rating with no frame flex. Handles Labs, Shepherds, Goldens and Mastiffs.</li>
-  <li><strong>10 lbs, one-handed</strong> — lifts in and out of the car
+  <li><strong>10 lbs, one-handed</strong> â€” lifts in and out of the car
       between stops. No two-person lift, no dropping it on your shin.</li>
-  <li><strong>62" unfolded length</strong> — long enough to keep a gentle
+  <li><strong>62" unfolded length</strong> â€” long enough to keep a gentle
       incline out of SUVs, trucks and vans instead of the steep ladder angle
       that short ramps force on you.</li>
-  <li><strong>High side rails</strong> — a nervous dog cannot slide off the
+  <li><strong>High side rails</strong> â€” a nervous dog cannot slide off the
       edge, which is why 94% of owners report their dog using it within 24 hours.</li>
 </ul>
 
@@ -439,7 +458,7 @@ out. They are the same PawGrip\u2122 compound we use on the ramp deck, so they
 hold up to wet pavement and road salt rather than curling at the corners.</p>
 
 <ul>
-  <li><strong>2 mats per pack</strong> — one spare, because they do wear out</li>
+  <li><strong>2 mats per pack</strong> â€” one spare, because they do wear out</li>
   <li>Fits all PawGrip Pro ramp feet</li>
   <li>Removes and re-sticks in seconds</li>
   <li>Weather and road-salt resistant</li>
@@ -476,7 +495,7 @@ stops moving.</em></p>
     description: `
 <h2>You Fixed the Getting In. Now Fix the Drive.</h2>
 <p>An untethered 70 lb dog becomes a 2,000 lb projectile in a 30 mph
-collision. That is not a scare tactic — it is the reason crash-test standards
+collision. That is not a scare tactic â€” it is the reason crash-test standards
 exist for pet restraints, and the reason a ramp alone only solves half the
 problem.</p>
 
@@ -487,7 +506,7 @@ without letting them roam the cabin.</p>
 
 <ul>
   <li>Attaches to any harness with a rear clip</li>
-  <li>Adjustable length — sit, stand or lie down comfortably</li>
+  <li>Adjustable length â€” sit, stand or lie down comfortably</li>
   <li>Load-rated webbing, not elastic bungee cord</li>
   <li>Fits every vehicle, front or rear seat</li>
 </ul>
@@ -523,7 +542,7 @@ on the same order more often than any other accessory.</p>
 <h2>The Car Was Never the Only Problem</h2>
 <p>Most owners buy a ramp for the SUV, then realise their dog has been
 struggling with the couch for two years. Same physics, same joint damage,
-just a shorter drop — repeated hundreds more times a day.</p>
+just a shorter drop â€” repeated hundreds more times a day.</p>
 
 <p>Our <strong>Orthopedic Foam Bed Steps</strong> use the same 4x body-weight
 logic as the ramp. Four shallow steps instead of one launch, on
@@ -573,14 +592,14 @@ load</strong> (the ramp, the steps, no jumping) and <strong>daily
 support</strong> (supplementation).</p>
 
 <p><strong>Advanced Hip &amp; Joint Soft Chews</strong> are formulated with
-veterinarians around the trio that actually has evidence behind it —
-glucosamine, chondroitin and MSM — in a soft chew dogs treat as a treat, not
+veterinarians around the trio that actually has evidence behind it â€”
+glucosamine, chondroitin and MSM â€” in a soft chew dogs treat as a treat, not
 a pill fight.</p>
 
 <ul>
   <li>Vet-formulated, made in the USA</li>
   <li>Glucosamine + chondroitin + MSM</li>
-  <li>Soft chew — no pilling, no hiding it in cheese</li>
+  <li>Soft chew â€” no pilling, no hiding it in cheese</li>
   <li>Available on Subscribe &amp; Save so it never runs out</li>
 </ul>
 
@@ -591,9 +610,9 @@ why the difference faded. A recurring order removes that decision.</p>
   },
 ];
 
-/* Collections — 'Bumps' is intentionally hidden from the storefront. */
+/* Collections â€” 'Bumps' is intentionally hidden from the storefront. */
 const COLLECTIONS = [
-  { key: 'carMobility', title: 'Car Mobility', handle: 'car-mobility', description: 'Everything for a safer, calmer car ride — ramps, tethers and traction.' },
+  { key: 'carMobility', title: 'Car Mobility', handle: 'car-mobility', description: 'Everything for a safer, calmer car ride â€” ramps, tethers and traction.' },
   { key: 'homeMobility', title: 'Home Mobility', handle: 'home-mobility', description: 'Joint-saving solutions for the couch, the bed and the stairs.' },
   { key: 'jointCare', title: 'Joint Care', handle: 'joint-care', description: 'Daily support for hips and joints, formulated with veterinarians.' },
   { key: 'bumps', title: 'Bumps', handle: 'bumps', description: 'Internal: order-bump and upsell products. Not shown to customers.', hidden: true },
@@ -614,13 +633,13 @@ const COLLECTION_MEMBERSHIP = {
 const manifest = { createdAt: new Date().toISOString(), shop: SHOP_DOMAIN, products: {}, collections: {} };
 
 async function seedProducts() {
-  log('\n── Products ─────────────────────────────────────────────');
+  log('\nâ”€â”€ Products â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
   for (const item of CATALOG) {
     // Dry run makes no API calls, so it can run without credentials
     const existing = DRY_RUN ? null : await findProductByHandle(item.handle);
 
     if (VERIFY_ONLY) {
-      log(`  ${existing ? '✓' : '·'} ${item.handle}${existing ? `  (${existing.title})` : '  — not created yet'}`);
+      log(`  ${existing ? 'âœ“' : 'Â·'} ${item.handle}${existing ? `  (${existing.title})` : '  â€” not created yet'}`);
       manifest.products[item.key] = { handle: item.handle, exists: Boolean(existing), id: existing?.id ?? null };
       continue;
     }
@@ -705,7 +724,7 @@ async function seedProducts() {
       }
 
       const created = data.productCreate.product;
-      ok(`created ${created.handle} — ${created.title}`);
+      ok(`created ${created.handle} â€” ${created.title}`);
       const variant = created.variants.edges[0]?.node;
       manifest.products[item.key] = {
         handle: item.handle,
@@ -727,7 +746,7 @@ async function seedProducts() {
  * never see it even though it exists in Admin.
  */
 async function publishToOnlineStore() {
-  log('\n── Publish to Online Store ──────────────────────────────');
+  log('\nâ”€â”€ Publish to Online Store â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
 
   if (DRY_RUN) {
     log('  (dry-run) would publish all products to the Online Store channel');
@@ -800,17 +819,46 @@ async function publishToOnlineStore() {
   }
 
   if (published) ok(`published ${published} product(s) to "${onlineStore.name}"`);
-  if (failed) warn(`${failed} product(s) could not be auto-published — set their sales channel manually in Admin.`);
+  if (failed) warn(`${failed} product(s) could not be auto-published â€” set their sales channel manually in Admin.`);
 }
 
+/**
+ * Collections are cosmetic organisation in the Admin.
+ *
+ * The React storefront does NOT depend on them â€” it maps products by handle
+ * and tag (see src/lib/offers.ts), so a store with no collections still works
+ * end to end. Because of that, a missing read/write_collections scope is
+ * treated as a soft failure: the seeder warns and carries on rather than
+ * aborting the catalog you actually need.
+ */
 async function seedCollections() {
-  log('\n── Collections ──────────────────────────────────────────');
+  log('\nâ”€â”€ Collections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
+
+  // Probe permissions once with a harmless read before attempting writes
+  if (!DRY_RUN && !VERIFY_ONLY) {
+    try {
+      await gql(`query { collections(first: 1) { edges { node { id } } } }`);
+    } catch (err) {
+      if (/access denied|not authorized|scope/i.test(err.message)) {
+        warn('Collections scopes not granted â€” skipping collections.');
+        warn('Products, stock and tags are still created normally.');
+        warn('The storefront reads handles + tags, so nothing breaks.');
+        warn('To enable later: add read_collections + write_collections, release a');
+        warn('new app version, then re-run `npm run shopify:seed`.');
+        return;
+      }
+      // Any other error (network, rate limit) is worth surfacing but not fatal
+      warn(`Collections probe failed: ${err.message}`);
+      warn('Continuing without collections.');
+      return;
+    }
+  }
 
   for (const col of COLLECTIONS) {
     const existing = DRY_RUN ? null : await findCollectionByHandle(col.handle);
 
     if (VERIFY_ONLY) {
-      log(`  ${existing ? '✓' : '·'} ${col.handle}${existing ? `  (${existing.title})` : '  — not created yet'}`);
+      log(`  ${existing ? 'âœ“' : 'Â·'} ${col.handle}${existing ? `  (${existing.title})` : '  â€” not created yet'}`);
       manifest.collections[col.key] = { handle: col.handle, exists: Boolean(existing), id: existing?.id ?? null };
       continue;
     }
@@ -823,23 +871,34 @@ async function seedCollections() {
       manifest.collections[col.key] = { handle: col.handle, id: existing.id, exists: true, updated: true };
       ok(`collection exists: ${col.handle}`);
     } else {
-      const data = await gql(
-        `mutation collectionCreate($input: CollectionInput!) {
-           collectionCreate(input: $input) {
-             collection { id title handle }
-             userErrors { field message }
-           }
-         }`,
-        {
-          input: {
-            title: col.title,
-            handle: col.handle,
-            descriptionHtml: col.hidden
-              ? col.description
-              : `<p>${col.description}</p>`,
-          },
+      let data;
+      try {
+        data = await gql(
+          `mutation collectionCreate($input: CollectionInput!) {
+             collectionCreate(input: $input) {
+               collection { id title handle }
+               userErrors { field message }
+             }
+           }`,
+          {
+            input: {
+              title: col.title,
+              handle: col.handle,
+              descriptionHtml: col.hidden
+                ? col.description
+                : `<p>${col.description}</p>`,
+            },
+          }
+        );
+      } catch (err) {
+        // A scope error here means the probe gave a false positive â€” stop and warn
+        if (/access denied|not authorized|scope/i.test(err.message)) {
+          warn(`Cannot create collections (${err.message.slice(0, 80)}). Skipping.`);
+          return;
         }
-      );
+        warn(`collection ${col.handle} failed: ${err.message}`);
+        continue;
+      }
 
       const errs = data.collectionCreate.userErrors;
       if (errs?.length) {
@@ -857,7 +916,7 @@ async function seedCollections() {
 
   // Populate membership
   if (!DRY_RUN && !VERIFY_ONLY) {
-    log('\n── Collection membership ────────────────────────────────');
+    log('\nâ”€â”€ Collection membership â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
     for (const [colKey, productKeys] of Object.entries(COLLECTION_MEMBERSHIP)) {
       const col = manifest.collections[colKey];
       if (!col?.id) continue;
@@ -887,7 +946,7 @@ async function seedCollections() {
 }
 
 async function verify() {
-  log(`\n── Verifying store: ${SHOP_DOMAIN} ───────────────────────`);
+  log(`\nâ”€â”€ Verifying store: ${SHOP_DOMAIN} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€`);
   try {
     const data = await gql(
       `query {
@@ -908,12 +967,12 @@ async function verify() {
       if (found) {
         matched += 1;
         const v = found.variants.edges[0]?.node;
-        log(`  ✓ ${found.handle}`);
+        log(`  âœ“ ${found.handle}`);
         log(`      status: ${found.status}  stock: ${found.totalInventory ?? 'n/a'}`);
         log(`      price:  $${v?.price ?? '?'}  compare-at: $${v?.compareAtPrice ?? '?'}`);
         log(`      tags:   ${found.tags?.join(', ') || '(none)'}`);
       } else {
-        log(`  · ${item.handle} — not found`);
+        log(`  Â· ${item.handle} â€” not found`);
       }
     }
 
@@ -933,7 +992,7 @@ async function verify() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Purge — remove products that are not part of this catalog                   */
+/* Purge â€” remove products that are not part of this catalog                   */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -947,7 +1006,7 @@ async function verify() {
  * about to delete before doing it.
  */
 async function purgeForeignProducts() {
-  log('\n── Purge non-catalog products ──────────────────────────');
+  log('\nâ”€â”€ Purge non-catalog products â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
 
   const data = await gql(
     `query($after: String) {
@@ -966,7 +1025,7 @@ async function purgeForeignProducts() {
   const skipped = all.filter((p) => catalogHandles.has(p.handle) || p.handle === 'gift-card');
 
   if (targets.length === 0) {
-    ok('Nothing to purge — every product belongs to the catalog.');
+    ok('Nothing to purge â€” every product belongs to the catalog.');
     return;
   }
 
@@ -1015,18 +1074,18 @@ async function purgeForeignProducts() {
 
 async function main() {
   log('\n======================================================');
-  log('  PawGrip Pro — Shopify catalog seeder');
+  log('  PawGrip Pro â€” Shopify catalog seeder');
   log('======================================================');
   log(`  Shop:      ${SHOP_DOMAIN}`);
   log(`  API:       Admin API ${API_VERSION}`);
-  log(`  Mode:      ${VERIFY_ONLY ? 'VERIFY' : DRY_RUN ? 'DRY RUN' : 'LIVE — will create products'}`);
+  log(`  Mode:      ${VERIFY_ONLY ? 'VERIFY' : DRY_RUN ? 'DRY RUN' : 'LIVE â€” will create products'}`);
   log(`  Products:  ${CATALOG.length}  (1 hero + ${CATALOG.length - 1} supporting)`);
 
   if (DRY_RUN) {
-    log('\n  Dry run — nothing will be created or modified.');
+    log('\n  Dry run â€” nothing will be created or modified.');
   }
   if (VERIFY_ONLY) {
-    log('\n  Verify-only — will not change anything.');
+    log('\n  Verify-only â€” will not change anything.');
     await verify();
     log('\n  Done.\n');
     return;
@@ -1041,7 +1100,7 @@ async function main() {
 
   // Resolve credentials up front so scope problems surface before any writes
   if (!DRY_RUN) {
-    log('\n── Authentication ─────────────────────────────────────');
+    log('\nâ”€â”€ Authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
     await getToken();
     if (CLIENT_ID) {
       ok('Exchanged Client ID/secret for a 24-hour Admin token.');
@@ -1073,3 +1132,4 @@ main().catch((err) => {
   console.error(`\n  FATAL: ${err.message}\n`);
   process.exit(1);
 });
+
