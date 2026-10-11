@@ -18,6 +18,8 @@ export interface ProductVariantEdge {
     id: string;
     title: string;
     price: { amount: string; currencyCode: string };
+    availableForSale: boolean;
+    selectedOptions: { name: string; value: string }[];
   };
 }
 
@@ -116,4 +118,418 @@ export async function fetchProducts(): Promise<ProductEdge['node'][]> {
   }
 
   return data.products.edges.map((edge: ProductEdge) => edge.node);
+}
+
+/**
+ * Fetch a single product by handle (for the hero ramp product).
+ */
+export async function fetchProductByHandle(handle: string): Promise<ProductEdge['node'] | null> {
+  const query = `
+    query ProductByHandle($handle: String!) {
+      product(handle: $handle) {
+        id
+        title
+        handle
+        description
+        descriptionHtml
+        availableForSale
+        variants(first: 250) {
+          edges {
+            node {
+              id
+              title
+              price { amount currencyCode }
+              availableForSale
+              selectedOptions {
+                name
+                value
+              }
+            }
+          }
+        }
+        featuredImage {
+          url
+          altText
+        }
+        images(first: 10) {
+          edges {
+            node {
+              url
+              altText
+            }
+          }
+        }
+        priceRange {
+          minVariantPrice { amount currencyCode }
+          maxVariantPrice { amount currencyCode }
+        }
+        onlineStoreUrl
+      }
+    }
+  `;
+
+  const response = await fetch(`https://${DOMAIN}/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Storefront-Access-Token': TOKEN,
+    },
+    body: JSON.stringify({ query, variables: { handle } }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Shopify API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const { data, errors } = await response.json();
+
+  if (errors || !data?.product) {
+    return null;
+  }
+
+  return data.product;
+}
+
+export interface CartLine {
+  merchandiseId: string;
+  quantity: number;
+  attributes?: { key: string; value: string }[];
+}
+
+export interface Cart {
+  id: string;
+  checkoutUrl: string;
+  totalQuantity: number;
+  cost: {
+    totalAmount: { amount: string; currencyCode: string };
+    subtotalAmount: { amount: string; currencyCode: string };
+    totalTaxAmount?: { amount: string; currencyCode: string };
+    totalDutyAmount?: { amount: string; currencyCode: string };
+  };
+  lines: {
+    edges: {
+      node: {
+        id: string;
+        quantity: number;
+        cost: {
+          totalAmount: { amount: string; currencyCode: string };
+        };
+        merchandise: {
+          id: string;
+          title: string;
+          product: { title: string; handle: string };
+          selectedOptions: { name: string; value: string }[];
+        };
+      };
+    }[];
+  };
+}
+
+/**
+ * Create a new cart.
+ */
+export async function createCart(lines: CartLine[] = []): Promise<Cart> {
+  const query = `
+    mutation CartCreate($input: CartInput) {
+      cartCreate(input: $input) {
+        cart {
+          id
+          checkoutUrl
+          totalQuantity
+          cost {
+            totalAmount { amount currencyCode }
+            subtotalAmount { amount currencyCode }
+            totalTaxAmount { amount currencyCode }
+            totalDutyAmount { amount currencyCode }
+          }
+          lines(first: 250) {
+            edges {
+              node {
+                id
+                quantity
+                cost { totalAmount { amount currencyCode } }
+                merchandise {
+                  id
+                  title
+                  product { title handle }
+                  selectedOptions { name value }
+                }
+              }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const response = await fetch(`https://${DOMAIN}/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Storefront-Access-Token': TOKEN,
+    },
+    body: JSON.stringify({
+      query,
+      variables: { input: { lines } },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Shopify API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const { data, errors } = await response.json();
+
+  if (errors || data?.cartCreate?.userErrors?.length) {
+    const msg = data?.cartCreate?.userErrors?.[0]?.message || errors?.[0]?.message || 'Cart creation failed';
+    throw new Error(msg);
+  }
+
+  return data.cartCreate.cart;
+}
+
+/**
+ * Add lines to an existing cart.
+ */
+export async function addToCart(cartId: string, lines: CartLine[]): Promise<Cart> {
+  const query = `
+    mutation CartLinesAdd($cartId: ID!, $lines: [CartLineInput!]!) {
+      cartLinesAdd(cartId: $cartId, lines: $lines) {
+        cart {
+          id
+          checkoutUrl
+          totalQuantity
+          cost {
+            totalAmount { amount currencyCode }
+            subtotalAmount { amount currencyCode }
+            totalTaxAmount { amount currencyCode }
+            totalDutyAmount { amount currencyCode }
+          }
+          lines(first: 250) {
+            edges {
+              node {
+                id
+                quantity
+                cost { totalAmount { amount currencyCode } }
+                merchandise {
+                  id
+                  title
+                  product { title handle }
+                  selectedOptions { name value }
+                }
+              }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const response = await fetch(`https://${DOMAIN}/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Storefront-Access-Token': TOKEN,
+    },
+    body: JSON.stringify({
+      query,
+      variables: { cartId, lines },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Shopify API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const { data, errors } = await response.json();
+
+  if (errors || data?.cartLinesAdd?.userErrors?.length) {
+    const msg = data?.cartLinesAdd?.userErrors?.[0]?.message || errors?.[0]?.message || 'Add to cart failed';
+    throw new Error(msg);
+  }
+
+  return data.cartLinesAdd.cart;
+}
+
+/**
+ * Get cart by ID.
+ */
+export async function getCart(cartId: string): Promise<Cart | null> {
+  const query = `
+    query GetCart($cartId: ID!) {
+      cart(id: $cartId) {
+        id
+        checkoutUrl
+        totalQuantity
+        cost {
+          totalAmount { amount currencyCode }
+          subtotalAmount { amount currencyCode }
+          totalTaxAmount { amount currencyCode }
+          totalDutyAmount { amount currencyCode }
+        }
+        lines(first: 250) {
+          edges {
+            node {
+              id
+              quantity
+              cost { totalAmount { amount currencyCode } }
+              merchandise {
+                id
+                title
+                product { title handle }
+                selectedOptions { name value }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const response = await fetch(`https://${DOMAIN}/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Storefront-Access-Token': TOKEN,
+    },
+    body: JSON.stringify({ query, variables: { cartId } }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Shopify API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const { data, errors } = await response.json();
+
+  if (errors || !data?.cart) {
+    return null;
+  }
+
+  return data.cart;
+}
+
+/**
+ * Update cart line quantities.
+ */
+export async function updateCartLines(cartId: string, lines: { id: string; quantity: number }[]): Promise<Cart> {
+  const query = `
+    mutation CartLinesUpdate($cartId: ID!, $lines: [CartLineUpdateInput!]!) {
+      cartLinesUpdate(cartId: $cartId, lines: $lines) {
+        cart {
+          id
+          checkoutUrl
+          totalQuantity
+          cost {
+            totalAmount { amount currencyCode }
+            subtotalAmount { amount currencyCode }
+          }
+          lines(first: 250) {
+            edges {
+              node {
+                id
+                quantity
+                cost { totalAmount { amount currencyCode } }
+                merchandise {
+                  id
+                  title
+                  product { title handle }
+                  selectedOptions { name value }
+                }
+              }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const response = await fetch(`https://${DOMAIN}/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Storefront-Access-Token': TOKEN,
+    },
+    body: JSON.stringify({
+      query,
+      variables: { cartId, lines },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Shopify API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const { data, errors } = await response.json();
+
+  if (errors || data?.cartLinesUpdate?.userErrors?.length) {
+    const msg = data?.cartLinesUpdate?.userErrors?.[0]?.message || errors?.[0]?.message || 'Cart update failed';
+    throw new Error(msg);
+  }
+
+  return data.cartLinesUpdate.cart;
+}
+
+/**
+ * Remove lines from cart.
+ */
+export async function removeFromCart(cartId: string, lineIds: string[]): Promise<Cart> {
+  const query = `
+    mutation CartLinesRemove($cartId: ID!, $lineIds: [ID!]!) {
+      cartLinesRemove(cartId: $cartId, lineIds: $lineIds) {
+        cart {
+          id
+          checkoutUrl
+          totalQuantity
+          cost {
+            totalAmount { amount currencyCode }
+            subtotalAmount { amount currencyCode }
+          }
+          lines(first: 250) {
+            edges {
+              node {
+                id
+                quantity
+                cost { totalAmount { amount currencyCode } }
+                merchandise {
+                  id
+                  title
+                  product { title handle }
+                  selectedOptions { name value }
+                }
+              }
+            }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const response = await fetch(`https://${DOMAIN}/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Storefront-Access-Token': TOKEN,
+    },
+    body: JSON.stringify({
+      query,
+      variables: { cartId, lineIds },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Shopify API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const { data, errors } = await response.json();
+
+  if (errors || data?.cartLinesRemove?.userErrors?.length) {
+    const msg = data?.cartLinesRemove?.userErrors?.[0]?.message || errors?.[0]?.message || 'Cart remove failed';
+    throw new Error(msg);
+  }
+
+  return data.cartLinesRemove.cart;
 }
