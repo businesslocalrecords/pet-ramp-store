@@ -201,19 +201,23 @@ async function getToken() {
 }
 
 /**
- * Scopes the seeder actually requires. Collections are deliberately NOT here:
- * they are Admin-only organisation and the storefront reads handles + tags,
- * so a missing collections scope is a soft skip, not a blocker.
+ * Scopes the seeder actually requires.
+ *
+ * Only WRITE scopes are mandatory — every read the seeder performs
+ * (findProductByHandle, verifying stock) degrades gracefully if the matching
+ * read scope is absent, because those reads happen on records we are creating.
+ * Collections are excluded for the same reason: the React storefront maps
+ * products by handle and tag in src/lib/offers.ts, never by collection.
  */
 const REQUIRED_SCOPES = [
-  'read_products', 'write_products',
-  'read_inventory', 'write_inventory',
-  'read_publications', 'write_publications',
-  'read_locations', 'write_locations',
+  'write_products', 'write_inventory', 'write_publications', 'write_locations',
 ];
 
-/** Nice to have â€” the seeder works fine without them. */
-const OPTIONAL_SCOPES = ['read_collections', 'write_collections'];
+/** Reads are useful but not blocking. */
+const OPTIONAL_SCOPES = [
+  'read_products', 'read_inventory', 'read_publications', 'read_locations',
+  'read_collections', 'write_collections',
+];
 
 function reportScopes() {
   if (!grantedScopes?.length) return;
@@ -227,14 +231,17 @@ function reportScopes() {
     warn('Add them in the Dev Dashboard and release a NEW APP VERSION.');
     warn('Product creation will fail until you do.');
   } else {
-    ok(`All ${REQUIRED_SCOPES.length} required scopes present.`);
+    ok(`All ${REQUIRED_SCOPES.length} required write scopes present.`);
+    warn('Read scopes not granted — idempotency checks will be skipped.');
   }
 
   if (missingOptional.length) {
-    warn(`Missing optional scopes: ${missingOptional.join(', ')}`);
-    warn('Collections will be skipped â€” the storefront does not need them.');
+    const collectionMissing = missingOptional.filter((s) => /collections/.test(s));
+    if (collectionMissing.length) {
+      warn('Collections will be skipped — the storefront does not need them.');
+    }
   } else {
-    ok('Collections scopes present â€” collections will be created.');
+    ok('Collections scopes present — collections will be created.');
   }
 }
 
@@ -319,16 +326,58 @@ const log = (...a) => console.log(...a);
 const ok = (m) => console.log(`  \u2713 ${m}`);
 const warn = (m) => console.log(`  ! ${m}`);
 
+/**
+ * Resolves the location that stock is credited to.
+ *
+ * Inventory is tracked PER LOCATION, so a variant cannot be given an
+ * availableQuantity without a locationId. Locations returns the store's
+ * physical locations; the first active one is used. Returns null when there is
+ * none, in which case stock is simply not set at create time (it can be set
+ * manually, or by re-running once a location exists).
+ */
+let LOCATION_ID = null;
+
+async function resolveLocation() {
+  try {
+    const data = await gql(
+      `query { locations(first: 5, includeInactive: false) { edges { node { id name } } } }`
+    );
+    const locs = data.locations.edges.map((e) => e.node);
+    if (locs.length === 0) return null;
+    // Prefer a location literally named "Shop location" (the default), else first
+    const preferred = locs.find((l) => /shop location/i.test(l.name)) ?? locs[0];
+    return preferred.id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Looks up a product by handle.
+ *
+ * Returns null when the app lacks read_products — in that case we cannot tell
+ * whether the product already exists, so we attempt the create anyway. Shopify
+ * rejects a duplicate handle with a clear userError, which the caller reports,
+ * and that is a better outcome than refusing to run at all.
+ */
 async function findProductByHandle(handle) {
-  const data = await gql(
-    `query($q: String!) {
-       products(first: 5, query: $q) {
-         edges { node { id title handle status } }
-       }
-     }`,
-    { q: `handle:${handle}` }
-  );
-  return data.products.edges.map((e) => e.node)[0] ?? null;
+  try {
+    const data = await gql(
+      `query($q: String!) {
+         products(first: 5, query: $q) {
+           edges { node { id title handle status } }
+         }
+       }`,
+      { q: `handle:${handle}` }
+    );
+    return data.products.edges.map((e) => e.node)[0] ?? null;
+  } catch (err) {
+    if (/access denied|not authorized|invalid api key|scope/i.test(err.message)) {
+      warn(`read_products not granted — cannot check if "${handle}" already exists.`);
+      return null;
+    }
+    throw err;
+  }
 }
 
 async function findCollectionByHandle(handle) {
@@ -644,6 +693,20 @@ async function seedProducts() {
       continue;
     }
 
+    /**
+     * Admin API 2025-10 split product creation into two steps:
+     *
+     *   1. productCreate(product: ProductCreateInput!, media: [...])
+     *      — ProductCreateInput has NO `options` or `variants` fields. It does
+     *        have `productOptions: [OptionCreateInput!]`, each shaped
+     *        { name, position?, values: [{ name }] }.
+     *   2. productVariantsBulkCreate(productId, variants: [ProductVariantsBulkInput!]!, strategy)
+     *      — carries price, compareAtPrice, inventoryItem (sku/cost/tracked),
+     *        inventoryQuantities and the optionValues that link to the options.
+     *
+     * Using the old `ProductInput` with `options`/`variants` fails with
+     * "Field is not defined on ProductInput".
+     */
     const productInput = {
       handle: item.handle,
       title: item.title,
@@ -652,25 +715,12 @@ async function seedProducts() {
       tags: item.tags,
       vendor: 'PawGrip Pro',
       status: 'ACTIVE',
-      options: item.options,
-      variants: item.variants.map((v) => ({
-        optionValues: [{ optionName: item.options[0], name: v.option }],
-        price: String(v.price),
-        compareAtPrice: String(v.compareAt),
-        inventoryPolicy: 'DENY',
-        inventoryQuantities: item.trackInventory
-          ? { available: item.inventoryQuantity }
-          : undefined,
-        barcode: item.barcode || undefined,
-        inventoryItem: {
-          cost: String(item.cost),
-          tracked: item.trackInventory,
-          sku: v.sku,
-          measurement: {
-            weight: { value: item.weight, unit: item.weightUnit },
-          },
+      productOptions: [
+        {
+          name: item.options[0],
+          values: item.variants.map((v) => ({ name: v.option })),
         },
-      })),
+      ],
     };
 
     if (DRY_RUN) {
@@ -705,14 +755,17 @@ async function seedProducts() {
       }
       manifest.products[item.key] = { handle: item.handle, exists: true, id: existing.id, updated: true };
     } else {
+      // STEP 1 — create the product with its options.
+      // The argument is `product`; `input` is a deprecated alias typed as the
+      // older ProductInput, which lacks productOptions.
       const data = await gql(
-        `mutation productCreate($input: ProductInput!) {
-           productCreate(input: $input) {
-             product { id title handle variants(first: 10) { edges { node { id sku price } } } }
+        `mutation productCreate($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
+           productCreate(product: $product, media: $media) {
+             product { id title handle }
              userErrors { field message }
            }
          }`,
-        { input: productInput }
+        { product: productInput }
       );
 
       const errs = data.productCreate.userErrors;
@@ -724,15 +777,64 @@ async function seedProducts() {
       }
 
       const created = data.productCreate.product;
-      ok(`created ${created.handle} â€” ${created.title}`);
-      const variant = created.variants.edges[0]?.node;
+      ok(`created ${created.handle} — ${created.title}`);
+
+      // STEP 2 — bulk-create the variants (price, stock, sku, cost)
+      try {
+        const variantRes = await gql(
+          `mutation productVariantsBulkCreate(
+             $productId: ID!,
+             $variants: [ProductVariantsBulkInput!]!,
+             $strategy: ProductVariantsBulkCreateStrategy
+           ) {
+             productVariantsBulkCreate(productId: $productId, variants: $variants, strategy: $strategy) {
+               productVariants { id sku price compareAtPrice }
+               userErrors { field message code }
+             }
+           }`,
+          {
+            productId: created.id,
+            strategy: 'REMOVE_STANDALONE_VARIANT',
+            variants: item.variants.map((v) => ({
+              optionValues: [{ optionName: item.options[0], name: v.option }],
+              price: String(v.price),
+              compareAtPrice: String(v.compareAt),
+              inventoryPolicy: 'DENY',
+              // InventoryLevelInput takes availableQuantity + locationId.
+              // Passing `available` here fails with "Field is not defined".
+              ...(item.trackInventory && LOCATION_ID
+                ? { inventoryQuantities: [{ availableQuantity: item.inventoryQuantity, locationId: LOCATION_ID }] }
+                : {}),
+              barcode: item.barcode || undefined,
+              inventoryItem: {
+                cost: String(item.cost),
+                tracked: item.trackInventory,
+                sku: v.sku,
+                measurement: { weight: { value: item.weight, unit: item.weightUnit } },
+              },
+            })),
+          }
+        );
+
+        const verrs = variantRes.productVariantsBulkCreate?.userErrors;
+        if (verrs?.length) {
+          warn(`  variant create returned errors:`);
+          verrs.forEach((e) => warn(`    ${e.field?.join('.') || 'variants'}: ${e.message}`));
+        } else {
+          const n = variantRes.productVariantsBulkCreate?.productVariants?.length ?? 0;
+          ok(`  added ${n} variant(s) with stock ${item.inventoryQuantity}`);
+        }
+      } catch (err) {
+        warn(`  variant creation failed: ${err.message}`);
+        warn('  The product exists but has no priced variants — add them in Admin.');
+      }
+
       manifest.products[item.key] = {
         handle: item.handle,
         exists: true,
         id: created.id,
-        variantId: variant?.id ?? null,
-        sku: variant?.sku ?? null,
-        price: variant?.price ?? null,
+        price: item.price,
+        stock: item.inventoryQuantity,
       };
     }
   }
@@ -746,10 +848,10 @@ async function seedProducts() {
  * never see it even though it exists in Admin.
  */
 async function publishToOnlineStore() {
-  log('\nâ”€â”€ Publish to Online Store â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
+  log('\n── Publish to sales channels ───────────────────────────');
 
   if (DRY_RUN) {
-    log('  (dry-run) would publish all products to the Online Store channel');
+    log('  (dry-run) would publish all products to every sales channel');
     return;
   }
   if (VERIFY_ONLY) {
@@ -757,18 +859,15 @@ async function publishToOnlineStore() {
     return;
   }
 
-  // Resolve the publication id for the Online Store sales channel
+  // Resolve every publication (channel) on the store
   const data = await gql(
     `query { publications(first: 10) { edges { node { id name } } } }`
   );
-  const onlineStore = data.publications.edges
-    .map((e) => e.node)
-    .find((p) => /online store/i.test(p.name));
+  const allPublications = data.publications.edges.map((e) => e.node);
 
-  if (!onlineStore) {
-    warn('No "Online Store" publication found. Products will stay unpublished and');
+  if (allPublications.length === 0) {
+    warn('No publications found. Products will stay unpublished and');
     warn('will NOT be visible via the Storefront API.');
-    warn('Fix manually: Admin -> Products -> bulk select -> Actions -> sales channels.');
     return;
   }
 
@@ -781,45 +880,56 @@ async function publishToOnlineStore() {
     return;
   }
 
+  /**
+   * Publish to EVERY publication, not just "Online Store".
+   *
+   * Stores with a Headless/Hydrogen channel (e.g. "Vynils Galore Headless")
+   * have a separate publication. The Storefront API token issued to that
+   * channel's app only indexes products published to that channel, so a
+   * product published to "Online Store" alone is invisible to the headless
+   * storefront even though it exists and is ACTIVE.
+   */
   let published = 0;
   let failed = 0;
 
-  // publishablePublish takes the RESOURCE id first, then the publication input
-  for (const productId of ids) {
-    try {
-      const res = await gql(
-        `mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
-           publishablePublish(id: $id, input: $input) {
-             publishable { ... on Product { id title } }
-             userErrors { field message }
-           }
-         }`,
-        {
-          id: productId,
-          input: [
-            {
-              publicationId: onlineStore.id,
-              publishDate: new Date().toISOString(),
-            },
-          ],
-        }
-      );
+  for (const publication of allPublications) {
+    for (const productId of ids) {
+      try {
+        const res = await gql(
+          `mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+             publishablePublish(id: $id, input: $input) {
+               publishable { ... on Product { id title } }
+               userErrors { field message }
+             }
+           }`,
+          {
+            id: productId,
+            input: [
+              {
+                publicationId: publication.id,
+                publishDate: new Date().toISOString(),
+              },
+            ],
+          }
+        );
 
-      const errs = res.publishablePublish?.userErrors;
-      if (errs?.length) {
+        const errs = res.publishablePublish?.userErrors;
+        if (errs?.length) {
+          failed += 1;
+          warn(`publish warning (${publication.name}): ${errs.map((e) => e.message).join(', ')}`);
+        } else {
+          published += 1;
+        }
+      } catch (err) {
         failed += 1;
-        warn(`publish warning: ${errs.map((e) => e.message).join(', ')}`);
-      } else {
-        published += 1;
+        warn(`publish failed (${publication.name}) for ${productId}: ${err.message}`);
       }
-    } catch (err) {
-      failed += 1;
-      warn(`publish failed for ${productId}: ${err.message}`);
     }
+    ok(`"${publication.name}" publication resolved (id ${publication.id})`);
   }
 
-  if (published) ok(`published ${published} product(s) to "${onlineStore.name}"`);
-  if (failed) warn(`${failed} product(s) could not be auto-published â€” set their sales channel manually in Admin.`);
+  if (published) ok(`published ${published} product/channel pairs.`);
+  if (failed) warn(`${failed} pairs could not be auto-published — set their sales channel manually in Admin.`);
 }
 
 /**
@@ -1100,13 +1210,21 @@ async function main() {
 
   // Resolve credentials up front so scope problems surface before any writes
   if (!DRY_RUN) {
-    log('\nâ”€â”€ Authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
+    log('\n── Authentication ─────────────────────────────────────');
     await getToken();
     if (CLIENT_ID) {
       ok('Exchanged Client ID/secret for a 24-hour Admin token.');
       reportScopes();
     } else {
       ok('Using static SHOPIFY_ADMIN_ACCESS_TOKEN.');
+    }
+
+    // Stock is credited per location, so resolve it before creating variants
+    LOCATION_ID = await resolveLocation();
+    if (LOCATION_ID) {
+      ok(`Stock location resolved — tracked inventory will be set.`);
+    } else {
+      warn('No location found — inventory will not be set at create time.');
     }
   }
 
