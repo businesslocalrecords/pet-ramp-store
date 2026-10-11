@@ -15,14 +15,15 @@
   --color-brand-800: #92400E;
   --color-brand-900: #78350F;
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
 
   --ease-snap: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* ==========================================================================
-   Base
+   Base Typography
+   Mathematical, high-trust type scale.
    ========================================================================== */
 html {
   scroll-behavior: smooth;
@@ -31,14 +32,23 @@ html {
 
 body {
   font-family: var(--font-sans);
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Tighter optical tracking for large display text */
-h1, h2 {
-  letter-spacing: -0.025em;
+/* Tight kerning on headings */
+h1, h2, h3, h4 {
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+/* Readable body copy */
+p {
+  line-height: 1.7;
+  letter-spacing: -0.01em;
 }
 
 /* ==========================================================================
@@ -60,14 +70,14 @@ h1, h2 {
   100% { opacity: 1; transform: scale(1) rotate(0deg); }
 }
 
-@keyframes marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-
 @keyframes shimmer {
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
+}
+
+@keyframes pulse-once {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 @keyframes float {
@@ -95,14 +105,12 @@ h1, h2 {
   animation: float 6s ease-in-out infinite;
 }
 
-/* Shimmer text — used for premium headline accents */
+.animate-pulse-once {
+  animation: pulse-once 1.4s ease-in-out 2;
+}
+
 .text-shimmer {
-  background: linear-gradient(
-    100deg,
-    currentColor 20%,
-    rgb(251 191 36 / 90%) 45%,
-    currentColor 70%
-  );
+  background: linear-gradient(100deg, currentColor 20%, rgb(251 191 36 / 90%) 45%, currentColor 70%);
   background-size: 200% auto;
   -webkit-background-clip: text;
   background-clip: text;
@@ -133,6 +141,16 @@ h1, h2 {
   background-size: 24px 24px;
 }
 
+/* Hide scrollbars for horizontal UGC / carousel swiping */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* ==========================================================================
    Accessibility
    ========================================================================== */
@@ -141,22 +159,17 @@ h1, h2 {
     scroll-behavior: auto;
   }
 
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 
-  .animate-star-pop {
-    opacity: 1;
-  }
+  .animate-star-pop { opacity: 1; }
 }
 
-/* Focus visibility */
 :focus-visible {
-  outline: 2px solid var(--color-brand-500);
+  outline: 2px solid #2563eb;
   outline-offset: 2px;
   border-radius: 4px;
 }

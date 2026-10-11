@@ -4,7 +4,25 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#1C1917" />
+    <meta name="theme-color" content="#ffffff" />
+
+    <!-- Font: Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+
+    <!-- Core Web Vitals: prioritize the LCP hero image -->
+    <link rel="preload" as="image" href="/assets/hero-ramp.svg" fetchpriority="high" />
 
     <!-- Primary SEO -->
     <title>PawGrip Pro — The Dog Car Ramp for Senior & Large Dogs | 250 lb Capacity</title>
@@ -48,10 +66,7 @@
         "name": "PawGrip Pro Dog Car Ramp",
         "image": "https://pawgrippro.com/assets/hero-ramp.svg",
         "description": "Telescoping dog car ramp with a vet-approved gentle slope, rated to 250 lbs. Folds flat for storage in any vehicle. Free insured shipping and a 30-day money-back guarantee.",
-        "brand": {
-          "@type": "Brand",
-          "name": "PawGrip Pro"
-        },
+        "brand": { "@type": "Brand", "name": "PawGrip Pro" },
         "offers": {
           "@type": "Offer",
           "url": "https://pawgrippro.com/",
@@ -60,11 +75,7 @@
           "availability": "https://schema.org/InStock",
           "shippingDetails": {
             "@type": "OfferShippingDetails",
-            "shippingRate": {
-              "@type": "MonetaryAmount",
-              "value": "0",
-              "currency": "USD"
-            }
+            "shippingRate": { "@type": "MonetaryAmount", "value": "0", "currency": "USD" }
           },
           "hasMerchantReturnPolicy": {
             "@type": "MerchantReturnPolicy",

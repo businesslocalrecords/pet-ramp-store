@@ -218,3 +218,111 @@ export function trackPurchase(
     });
   }
 }
+
+/* ==========================================================================
+   Enhanced Conversions
+   ========================================================================== */
+
+export interface DataLayerItem {
+  item_id: string;
+  item_name: string;
+  price: number;
+  quantity: number;
+}
+
+/**
+ * GA4 / Google Ads compliant dataLayer.push for begin_checkout.
+ *
+ * `currency` + `value` + `items` make the event measurable in GA4 reports and
+ * usable as a Google Ads conversion action for target-ROAS bidding.
+ *
+ * `user_data` follows the Enhanced Conversions schema and is only attached at
+ * the purchase step, where the shopper has actually supplied their details.
+ * Never push personal data you do not have consent to process.
+ */
+export function pushBeginCheckoutDataLayer(
+  items: DataLayerItem[],
+  currency = 'USD',
+  coupon?: string
+): void {
+  if (typeof window === 'undefined') return;
+
+  const value = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
+  window.dataLayer.push({
+    event: 'begin_checkout',
+    ecommerce: {
+      currency,
+      value: Number(value.toFixed(2)),
+      coupon,
+      items: items.map((item) => ({
+        item_id: item.item_id,
+        item_name: item.item_name,
+        price: item.price,
+        quantity: item.quantity,
+        item_category: 'Pet Ramp',
+      })),
+    },
+  });
+
+  console.debug('[Analytics] dataLayer begin_checkout pushed', { value, itemCount: items.length });
+}
+
+/**
+ * Enhanced Conversions payload for the purchase/thank-you step, including the
+ * `user_data` object Google matches against signed-in accounts. Call this from
+ * your order-confirmation page with the customer attributes you collected.
+ */
+export function pushPurchaseCompleteDataLayer(params: {
+  transactionId: string;
+  items: DataLayerItem[];
+  currency?: string;
+  shipping?: number;
+  tax?: number;
+  userData?: {
+    email?: string;
+    phoneNumber?: string;
+    address?: {
+      firstName?: string;
+      lastName?: string;
+      street?: string;
+      city?: string;
+      region?: string;
+      postalCode?: string;
+      country?: string;
+    };
+  };
+}): void {
+  if (typeof window === 'undefined') return;
+
+  const {
+    transactionId,
+    items,
+    currency = 'USD',
+    shipping = 0,
+    tax = 0,
+    userData,
+  } = params;
+
+  const value = items.reduce((sum, i) => sum + i.price * i.quantity, 0) + shipping + tax;
+
+  window.dataLayer.push({
+    event: 'purchase',
+    ecommerce: {
+      transaction_id: transactionId,
+      currency,
+      value: Number(value.toFixed(2)),
+      shipping,
+      tax,
+      items: items.map((item) => ({
+        item_id: item.item_id,
+        item_name: item.item_name,
+        price: item.price,
+        quantity: item.quantity,
+        item_category: 'Pet Ramp',
+      })),
+    },
+    // Enhanced Conversions — matched by Google against signed-in accounts
+    ...(userData ? { user_data: userData } : {}),
+  });
+}

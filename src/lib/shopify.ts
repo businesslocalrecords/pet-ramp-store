@@ -20,6 +20,7 @@ export interface ProductVariantEdge {
     price: { amount: string; currencyCode: string };
     availableForSale: boolean;
     selectedOptions: { name: string; value: string }[];
+    quantityAvailable: number | null;
   };
 }
 
@@ -27,6 +28,9 @@ export interface ProductImage {
   url: string;
   altText: string;
 }
+
+/** A single purchasable product variant. */
+export type Variant = ProductVariantEdge['node'];
 
 export interface ProductEdge {
   node: {
@@ -140,6 +144,7 @@ export async function fetchProductByHandle(handle: string): Promise<ProductEdge[
               title
               price { amount currencyCode }
               availableForSale
+              quantityAvailable
               selectedOptions {
                 name
                 value
@@ -532,4 +537,59 @@ export async function removeFromCart(cartId: string, lineIds: string[]): Promise
   }
 
   return data.cartLinesRemove.cart;
+}
+
+/**
+ * Real, live stock level for a product, summed across purchasable variants.
+ *
+ * Used for compliant scarcity messaging: stock claims must reflect the actual
+ * Shopify inventory, not a fabricated number. Returns null when inventory is
+ * not tracked or the API call fails, so callers can hide the message entirely
+ * rather than invent a figure.
+ */
+export async function fetchProductStock(handle: string): Promise<number | null> {
+  const query = `
+    query ProductStock($handle: String!) {
+      product(handle: $handle) {
+        variants(first: 250) {
+          edges {
+            node {
+              id
+              availableForSale
+              quantityAvailable
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const response = await fetch(`https://${DOMAIN}/api/${API_VERSION}/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Storefront-Access-Token': TOKEN,
+      },
+      body: JSON.stringify({ query, variables: { handle } }),
+    });
+
+    if (!response.ok) return null;
+
+    const { data, errors } = await response.json();
+    if (errors || !data?.product) return null;
+
+    const quantities: number[] = data.product.variants.edges
+      .map((edge: { node: { availableForSale: boolean; quantityAvailable: number | null } }) =>
+        edge.node.availableForSale ? edge.node.quantityAvailable : null
+      )
+      .filter((q: number | null): q is number => typeof q === 'number');
+
+    // Untracked inventory yields no numbers — signal "unknown" with null
+    if (quantities.length === 0) return null;
+
+    return quantities.reduce((sum: number, q: number) => sum + q, 0);
+  } catch {
+    return null;
+  }
 }

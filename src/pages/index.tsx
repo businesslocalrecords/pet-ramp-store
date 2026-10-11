@@ -1,67 +1,122 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
+import { Loader2 } from 'lucide-react';
+import { AdvertorialHeader } from '../components/AdvertorialHeader';
 import { UrgencyBar } from '../components/UrgencyBar';
 import { StickyHeader } from '../components/StickyHeader';
 import { HeroSection } from '../components/HeroSection';
-import { VideoProof } from '../components/VideoProof';
-import { SizeGuide } from '../components/SizeGuide';
+import { BuyBox } from '../components/BuyBox';
+import { FeatureBento } from '../components/FeatureBento';
 import { ComparisonTable } from '../components/ComparisonTable';
-import { Testimonials } from '../components/Testimonials';
-import { BundleSelector } from '../components/BundleSelector';
+import { SizeGuide } from '../components/SizeGuide';
 import { TrustBadges } from '../components/TrustBadges';
 import { ShippingReturns } from '../components/ShippingReturns';
 import { Faq } from '../components/Faq';
 import { Footer } from '../components/Footer';
-import { StickyMobileCTA } from '../components/StickyMobileCTA';
+import { StickyMobileBuyBar } from '../components/StickyMobileBuyBar';
+import { PurchaseProvider } from '../lib/purchase-provider';
+
+/* --------------------------------------------------------------------------
+   Core Web Vitals: defer below-the-fold sections.
+   Video, UGC and reviews are not needed for first paint, so they are
+   code-split and only fetched once they are likely to enter the viewport.
+   -------------------------------------------------------------------------- */
+const VideoProof = lazy(() => import('../components/VideoProof').then((m) => ({ default: m.VideoProof })));
+const UGCGallery = lazy(() => import('../components/UGCGallery').then((m) => ({ default: m.UGCGallery })));
+const Testimonials = lazy(() => import('../components/Testimonials').then((m) => ({ default: m.Testimonials })));
+
+/** Placeholder shown while a deferred chunk loads. */
+const SectionFallback: React.FC<{ label: string }> = ({ label }) => (
+  <div
+    className="flex items-center justify-center gap-2 rounded-3xl bg-stone-50 py-16 text-sm text-stone-400"
+    role="status"
+    aria-live="polite"
+  >
+    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+    Loading {label}&hellip;
+  </div>
+);
 
 /**
- * Single-product landing page for the PawGrip Pro dog car ramp.
- * Section order follows the conversion funnel:
- * urgency -> hero -> proof -> fit -> compare -> social proof -> offer -> trust -> logistics -> FAQ -> footer.
+ * Single-product landing page — 12-column split-screen direct response layout.
+ *
+ * Left  (7 cols): editorial content, natural scroll.
+ * Right (5 cols): sticky purchase column, always in view while reading.
  */
 const Page: React.FC = () => {
   return (
-    <div className="min-h-screen bg-white text-stone-900 antialiased selection:bg-amber-200 selection:text-stone-900">
-      {/* Announcement / scarcity bar */}
+    <div className="min-h-screen bg-white text-stone-900 antialiased selection:bg-blue-200 selection:text-stone-900">
+      {/* Top assurance bar (compliance-safe: real stock only, no fake timers) */}
       <UrgencyBar />
 
-      {/* Persistent buy CTA */}
+      {/* Advertorial disclosure */}
+      <AdvertorialHeader />
+
+      {/* Glass header + mobile buy bar */}
       <StickyHeader />
 
-      <main>
-        {/* Hero + offer */}
-        <HeroSection />
+      <main className="mx-auto max-w-7xl px-4 pb-24 pt-8 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-12">
+          {/* ---------------- LEFT: editorial column (7) ---------------- */}
+          <div className="space-y-16 lg:col-span-7">
+            <HeroSection />
 
-        {/* Video proof */}
-        <VideoProof />
+            <Suspense fallback={<SectionFallback label="the demo video" />}>
+              <VideoProof />
+            </Suspense>
 
-        {/* Size guide */}
-        <SizeGuide />
+            <Suspense fallback={<SectionFallback label="owner videos" />}>
+              <UGCGallery />
+            </Suspense>
 
-        {/* Comparison */}
-        <ComparisonTable />
+            <FeatureBento />
 
-        {/* Reviews */}
-        <Testimonials />
+            <ComparisonTable />
 
-        {/* Offer / bundles */}
-        <BundleSelector />
+            <SizeGuide />
 
-        {/* Trust badges */}
-        <TrustBadges />
+            <Suspense fallback={<SectionFallback label="reviews" />}>
+              <Testimonials />
+            </Suspense>
 
-        {/* Shipping & returns */}
-        <ShippingReturns />
+            <TrustBadges />
 
-        {/* FAQ */}
-        <Faq />
+            <ShippingReturns />
+
+            <Faq />
+          </div>
+
+          {/* ---------------- RIGHT: sticky buy column (5) ---------------- */}
+          <aside className="lg:col-span-5">
+            <div
+              id="offer"
+              className="lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:pr-1"
+            >
+              <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 sm:p-7">
+                <BuyBox />
+              </div>
+
+              <p className="mt-4 text-center text-xs text-stone-500">
+                Free insured shipping &middot; 30-day money-back guarantee &middot;
+                Lifetime hardware warranty
+              </p>
+            </div>
+          </aside>
+        </div>
       </main>
 
-      <Footer />
+      {/* Mobile-only sticky buy bar (needs the shared purchase context) */}
+      <StickyMobileBuyBar />
 
-      {/* Mobile sticky cart */}
-      <StickyMobileCTA />
+      <Footer />
     </div>
   );
 };
 
-export default Page;
+/** Wraps the page in the shared purchase context. */
+const PageWithProviders: React.FC = () => (
+  <PurchaseProvider>
+    <Page />
+  </PurchaseProvider>
+);
+
+export default PageWithProviders;
