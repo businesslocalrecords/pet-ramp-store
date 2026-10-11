@@ -16,28 +16,35 @@
  *
  * HOW TO GET THE TOKEN
  * --------------------
- *   1. Shopify Admin (https://admin.shopify.com/store/<your-store>)
- *   2. Settings (gear, bottom-left) -> Apps and sales channels
- *   3. "Develop apps" (top-right). If you see "Allow custom app development",
- *      enable it and confirm.
- *   4. "Create an app" -> name it e.g. "PawGrip Catalog Seeder" -> Create
- *   5. "Configure" tab -> "Admin API integration" -> select these scopes:
- *        read_products, write_products
- *        read_collections, write_collections
- *        read_inventory, write_inventory
- *        read_publications, write_publications
- *        read_locations, write_locations (needed to enable stock tracking)
- *   6. Save, then "Install app" -> confirm.
- *   7. "API credentials" tab -> "Admin API access token" -> Reveal token once
- *      -> Copy it. Shopify shows it ONLY ONCE — store it immediately.
- *   8. Add it to .env.local (never commit it):
- *        SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_........................
+ * Modern Shopify Dev Dashboard apps don't show you an access token at all.
+ * Instead you copy the Client ID and Client secret, and this script exchanges
+ * them for a 24-hour token automatically — no long-lived shpat_ token needed.
+ *
+ * In the Dev Dashboard (the page that shows "PMax One-Product Storefront"):
+ *   1. Settings -> Credentials -> copy the Client ID
+ *   2. Same section -> click reveal on Client secret -> copy it
+ *   3. Add BOTH to .env.local (never commit it):
+ *        SHOPIFY_CLIENT_ID=7a3868cb0531481a4d1c51356b478e8b
+ *        SHOPIFY_CLIENT_SECRET=<the secret you copied>
+ *
+ * Old-school alternative, if you would rather use a static token:
+ *   Admin -> Settings -> Apps and sales channels -> Develop apps -> create an
+ *   app -> Configure -> Admin API integration -> add scopes -> Install ->
+ *   "API credentials" tab -> "Admin API access token" -> copy it once.
+ *   Add to .env.local:  SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_....
+ *
+ * REQUIRED SCOPES on the app version (the token reads back what you granted):
+ *   read_products, write_products, read_collections, write_collections,
+ *   read_inventory, write_inventory, read_publications, write_publications,
+ *   read_locations, write_locations.
+ *   If a scope is missing, add it in the Dev Dashboard and release a new version.
  *
  * USAGE
  * -----
- *   node scripts/shopify-seed.mjs                 # create everything
- *   node scripts/shopify-seed.mjs --dry-run       # preview, change nothing
- *   node scripts/shopify-seed.mjs --verify        # re-check what exists
+ *   node scripts/shopify-seed.mjs --dry-run        # preview, no credentials
+ *   node scripts/shopify-seed.mjs                  # create everything
+ *   node scripts/shopify-seed.mjs --verify         # re-check what exists
+ *   node scripts/shopify-seed.mjs --purge --yes     # DELETE all non-catalog products
  *
  * The script is IDEMPOTENT: running it twice will not duplicate products.
  * It matches on handle, updates an existing product instead of creating a
@@ -51,10 +58,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const OUTPUT_FILE = path.join(__dirname, 'seed-output.json');
-
-const API_VERSION = '2025-10';
-const DRY_RUN = process.argv.includes('--dry-run');
-const VERIFY_ONLY = process.argv.includes('--verify');
 
 /* -------------------------------------------------------------------------- */
 /* Config — loaded from .env.local                                             */
@@ -87,24 +90,152 @@ const env = loadEnv();
 
 /** Domain comes from the existing storefront variable. */
 const SHOP_DOMAIN = env.VITE_SHOPIFY_STOREFRONT_DOMAIN;
-/** The Admin token is a NEW variable you must add to .env.local. */
-const ADMIN_TOKEN = env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+
+/**
+ * Authentication.
+ *
+ * Preference order:
+ *   1. SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET  (Dev Dashboard apps — the
+ *      script exchanges them for a fresh 24h token, so nothing long-lived
+ *      is ever stored on disk)
+ *   2. SHOPIFY_ADMIN_ACCESS_TOKEN                 (classic custom apps)
+ *
+ * ADMIN_TOKEN is assigned inside getToken(), which runs before any query.
+ */
+const CLIENT_ID = env.SHOPIFY_CLIENT_ID;
+const CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET;
+
+const PURGE = process.argv.includes('--purge');
+const CONFIRM = process.argv.includes('--yes');
+const API_VERSION = '2025-10';
+const DRY_RUN = process.argv.includes('--dry-run');
+const VERIFY_ONLY = process.argv.includes('--verify');
 
 if (!SHOP_DOMAIN) {
   console.error('  ERROR: VITE_SHOPIFY_STOREFRONT_DOMAIN is missing from .env.local');
   process.exit(1);
 }
-if (!ADMIN_TOKEN && !VERIFY_ONLY && !DRY_RUN) {
+
+let ADMIN_TOKEN = env.SHOPIFY_ADMIN_ACCESS_TOKEN || null;
+let tokenExpiresAt = 0;
+let grantedScopes = null;
+
+/**
+ * Exchanges the app's client credentials for a short-lived Admin API token.
+ * The grant only works when the app and the store are in the same Shopify
+ * organization — which they are if you created both yourself.
+ */
+async function exchangeCredentials() {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    throw new Error(
+      'No Admin credentials found.\n\n' +
+        '  Add BOTH of these to .env.local (from Dev Dashboard -> Settings -> Credentials):\n' +
+        '    SHOPIFY_CLIENT_ID=<32-char client id shown on that page>\n' +
+        '    SHOPIFY_CLIENT_SECRET=<click reveal, then copy>\n\n' +
+        '  Or, if you prefer a static token:\n' +
+        '    SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_....\n'
+    );
+  }
+
+  const res = await fetch(`https://${SHOP_DOMAIN}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    }),
+  });
+
+  const text = await res.text();
+
+  if (!res.ok) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    const shopError = parsed?.error || '';
+    if (shopError === 'shop_not_permitted') {
+      throw new Error(
+        'Client credentials rejected: shop_not_permitted.\n\n' +
+          '  The app and the store must belong to the SAME Shopify organization.\n' +
+          '  This happens when the app was created under a different org/account than\n' +
+          '  the one that owns ' + SHOP_DOMAIN + '.\n\n' +
+          '  Fix: re-create the app under the account that owns this store, then copy\n' +
+          '       the new Client ID and secret into .env.local.\n' +
+          '  Or:   use a static Admin API token instead (SHOPIFY_ADMIN_ACCESS_TOKEN).\n'
+      );
+    }
+    throw new Error(
+      `Token exchange failed (HTTP ${res.status}): ${text.slice(0, 300)}\n` +
+        '  Check that the Client ID and Client secret were copied exactly, with no spaces.'
+    );
+  }
+
+  const parsed = JSON.parse(text);
+  if (!parsed.access_token) {
+    throw new Error(`Token exchange returned no access_token: ${text.slice(0, 200)}`);
+  }
+
+  ADMIN_TOKEN = parsed.access_token;
+  tokenExpiresAt = Date.now() + (parsed.expires_in ?? 86399) * 1000;
+  grantedScopes = parsed.scope ? parsed.scope.split(',').map((s) => s.trim()).filter(Boolean) : [];
+}
+
+/** Resolves a valid Admin token, refreshing when it is close to expiry. */
+async function getToken() {
+  // Static token path — nothing to refresh
+  if (env.SHOPIFY_ADMIN_ACCESS_TOKEN && !CLIENT_ID) {
+    return env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+  }
+  // Client credentials path — refresh with a 60s safety margin
+  if (!ADMIN_TOKEN || Date.now() > tokenExpiresAt - 60_000) {
+    await exchangeCredentials();
+  }
+  return ADMIN_TOKEN;
+}
+
+/** Scopes the seeder needs; used to warn when the app version is too narrow. */
+const REQUIRED_SCOPES = [
+  'read_products', 'write_products',
+  'read_collections', 'write_collections',
+  'read_inventory', 'write_inventory',
+  'read_publications', 'write_publications',
+  'read_locations', 'write_locations',
+];
+
+function reportScopes() {
+  if (!grantedScopes?.length) return;
+  const missing = REQUIRED_SCOPES.filter((s) => !grantedScopes.includes(s));
+  console.log(`  Scopes granted: ${grantedScopes.length}`);
+  if (missing.length) {
+    warn(`Missing scopes: ${missing.join(', ')}`);
+    warn('Add them in the Dev Dashboard and release a NEW APP VERSION.');
+    warn('Some steps below will fail until you do.');
+  } else {
+    ok(`All ${REQUIRED_SCOPES.length} required scopes present.`);
+  }
+}
+
+if (!env.SHOPIFY_ADMIN_ACCESS_TOKEN && !CLIENT_ID && !DRY_RUN && !VERIFY_ONLY) {
   console.error(`
-  ERROR: SHOPIFY_ADMIN_ACCESS_TOKEN is missing from .env.local.
+  ERROR: no Admin API credentials in .env.local.
 
   The Storefront token (VITE_SHOPIFY_STOREFRONT_TOKEN) CANNOT create products —
-  that API is read-only. You need a custom-app Admin API token.
+  that API is read-only. You need credentials for a custom app.
 
-  See the "HOW TO GET THE TOKEN" comment block at the top of this file.
+  FASTEST PATH (uses the Client ID/secret you are already looking at):
+    Add these two lines to .env.local:
+      SHOPIFY_CLIENT_ID=<from Dev Dashboard -> Settings -> Credentials>
+      SHOPIFY_CLIENT_SECRET=<click reveal, then copy>
 
-  To preview the catalog without a token, run:
-      node scripts/shopify-seed.mjs --dry-run
+  Then run:
+      npm run shopify:seed
+
+  To preview the catalog without any credentials:
+      npm run shopify:seed:dry
 `);
   process.exit(1);
 }
@@ -117,13 +248,14 @@ let requestCount = 0;
 
 async function gql(query, variables = {}) {
   requestCount += 1;
+  const token = await getToken();
   const endpoint = `https://${SHOP_DOMAIN}/admin/api/${API_VERSION}/graphql.json`;
 
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': ADMIN_TOKEN,
+      'X-Shopify-Access-Token': token,
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -801,6 +933,83 @@ async function verify() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Purge — remove products that are not part of this catalog                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Deletes every product that is not part of the PawGrip catalog.
+ *
+ * Use this once, on a store seeded with Shopify's default demo products
+ * (snowboards, gift cards, etc.). Unrelated inventory causes Google Merchant
+ * Center disapproval for PMax / Shopping campaigns.
+ *
+ * Guarded: requires --purge AND --yes together, and prints exactly what it is
+ * about to delete before doing it.
+ */
+async function purgeForeignProducts() {
+  log('\n── Purge non-catalog products ──────────────────────────');
+
+  const data = await gql(
+    `query($after: String) {
+       products(first: 100, after: $after) {
+         edges { node { id title handle } }
+         pageInfo { hasNextPage endCursor }
+       }
+     }`
+  );
+
+  const all = data.products.edges.map((e) => e.node);
+  const catalogHandles = new Set(CATALOG.map((c) => c.handle));
+  // The default Shopify gift-card product is not deletable through the API and
+  // is ignored by Google Shopping, so it is left alone.
+  const targets = all.filter((p) => !catalogHandles.has(p.handle) && p.handle !== 'gift-card');
+  const skipped = all.filter((p) => catalogHandles.has(p.handle) || p.handle === 'gift-card');
+
+  if (targets.length === 0) {
+    ok('Nothing to purge — every product belongs to the catalog.');
+    return;
+  }
+
+  log(`  Will DELETE ${targets.length} product(s):`);
+  targets.forEach((p) => log(`    - ${p.title}   (${p.handle})`));
+  if (skipped.length) {
+    log(`  Keeping ${skipped.length} catalog product(s):`);
+    skipped.forEach((p) => log(`    + ${p.handle}`));
+  }
+
+  if (!CONFIRM) {
+    warn('\n  Re-run with BOTH flags to actually delete:');
+    warn('      npm run shopify:seed -- --purge --yes');
+    warn('  Nothing was deleted on this run.');
+    return;
+  }
+
+  let deleted = 0;
+  let failed = 0;
+  for (const p of targets) {
+    try {
+      await gql(
+        `mutation productDelete($id: ID!) {
+           productDelete(input: { id: $id }) {
+             deletedProductId
+             userErrors { field message }
+           }
+         }`,
+        { id: p.id }
+      );
+      deleted += 1;
+      ok(`deleted ${p.handle}`);
+    } catch (err) {
+      failed += 1;
+      warn(`could not delete ${p.handle}: ${err.message}`);
+    }
+  }
+
+  log(`\n  Deleted ${deleted} product(s)${failed ? `, ${failed} failed` : ''}.`);
+  if (failed) warn('Delete the remaining ones manually in Admin -> Products.');
+}
+
+/* -------------------------------------------------------------------------- */
 /* Main                                                                        */
 /* -------------------------------------------------------------------------- */
 
@@ -823,6 +1032,25 @@ async function main() {
     return;
   }
 
+  // Purge-only mode: clear out the dead vinyl/demo catalog, then stop
+  if (PURGE) {
+    await purgeForeignProducts();
+    log('\n  Done.\n');
+    return;
+  }
+
+  // Resolve credentials up front so scope problems surface before any writes
+  if (!DRY_RUN) {
+    log('\n── Authentication ─────────────────────────────────────');
+    await getToken();
+    if (CLIENT_ID) {
+      ok('Exchanged Client ID/secret for a 24-hour Admin token.');
+      reportScopes();
+    } else {
+      ok('Using static SHOPIFY_ADMIN_ACCESS_TOKEN.');
+    }
+  }
+
   await seedProducts();
   await publishToOnlineStore();
   await seedCollections();
@@ -837,7 +1065,7 @@ async function main() {
   log('    2. Admin -> Settings -> Locations -> confirm stock levels are tracked');
   log('    3. Replace the placeholder product images with white-background shots');
   log('       (GMC requires an image on every product for Shopping ads)');
-  log('    4. node scripts/shopify-seed.mjs --verify');
+  log('    4. npm run shopify:verify');
   log('\n  Done.\n');
 }
 

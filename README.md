@@ -27,8 +27,7 @@ Built with **React 19 + Vite + Tailwind CSS v4**, powered by the **Shopify Store
 npm install
 cp .env.example .env.local     # then fill in your Shopify credentials
 npm run shopify:seed:dry       # preview the catalog (no credentials needed)
-npm run shopify:seed           # create the catalog in Shopify
-npm run dev                    # http://localhost:5173
+npm run shopify:seed           # create the catalog in Shopifynpm run dev                    # http://localhost:5173
 npm run build                  # production bundle in dist/
 npm run lint                   # oxlint
 ```
@@ -40,36 +39,61 @@ npm run lint                   # oxlint
 | Token | Variable | Used for | Can create products? |
 |-------|----------|----------|---------------------|
 | **Storefront API** | `VITE_SHOPIFY_STOREFRONT_TOKEN` (32-char hex) | React frontend — reads products, writes carts | **No** — read-only |
-| **Admin API** | `SHOPIFY_ADMIN_ACCESS_TOKEN` (`shpat_…`) | `scripts/shopify-seed.mjs` | **Yes** |
+| **Admin API** | `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` | `scripts/shopify-seed.mjs` | **Yes** |
 
 The Storefront token in `.env.local` cannot create products; that API is
-read-only by design. To generate the Admin token:
+read-only by design, precisely so a leaked token can't rewrite your catalog.
 
-1. Shopify Admin → **Settings** → **Apps and sales channels**
-2. → **Develop apps** (enable custom app development if prompted)
-3. → **Create an app** → name it e.g. "PawGrip Catalog Seeder"
-4. → **Configure** → **Admin API integration** → add scopes:
-   `read_products`, `write_products`, `read_collections`, `write_collections`,
-   `read_inventory`, `write_inventory`, `read_publications`,
-   `write_publications`, `read_locations`, `write_locations`
-5. → **Save** → **Install app** → confirm
-6. → **API credentials** → reveal **Admin API access token** → copy it
-   *(shown only once)*
-7. Add to `.env.local`:
-   ```env
-   SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxxxxxxxxxxxxxxx
-   ```
+### 2. The credentials you already have
+
+If your app appears in the new **Dev Dashboard** (the page showing your app
+name, Installs, Credentials, Versions), Shopify no longer shows you an access
+token. Instead it gives you a **Client ID** and **Client secret**, and the
+seeder exchanges them for a 24-hour token automatically — nothing long-lived
+ever sits in `.env.local`.
+
+Add both to `.env.local`:
+
+```env
+SHOPIFY_CLIENT_ID=7a3868cb0531481a4d1c51356b478e8b
+SHOPIFY_CLIENT_SECRET=<click reveal, then copy>
+```
+
+That's the whole setup. No `shpat_` token needed.
+
+**Scopes required on the app version** (Settings → your version → scopes —
+release a new version after changing them):
+
+```
+read_products  write_products  read_collections  write_collections
+read_inventory write_inventory read_publications write_publications
+read_locations write_locations
+```
+
+The script prints which scopes it actually received, so a too-narrow app
+version fails loudly instead of half-way through.
+
+> Classic Admin-created apps work too — put the `shpat_…` token in
+> `SHOPIFY_ADMIN_ACCESS_TOKEN` and the script uses it directly.
 
 ### 2. Create the catalog
 
 ```bash
 npm run shopify:seed:dry    # preview, no credentials needed, no writes
-npm run shopify:seed        # create everything (needs the Admin token)
+npm run shopify:seed        # create everything
 npm run shopify:verify      # re-check what exists in the store
+npm run shopify:purge       # list non-catalog products (dry, deletes nothing)
+npm run shopify:purge -- --yes   # DELETE every non-catalog product
 ```
 
 The seeder is idempotent — it matches on handle, so running it twice updates
 rather than duplicates. Created IDs land in `scripts/seed-output.json`.
+
+**`--purge` is for reusing a store that already has junk in it.** It deletes
+everything that is not part of the PawGrip catalog — the default snowboard /
+gift-card demo products, dead vinyl inventory, anything — and keeps the Shopify
+`gift-card` product, which is not API-deletable and is ignored by Shopping ads.
+It prints the exact list first and requires `--yes` before deleting anything.
 
 ### 3. Products created
 
