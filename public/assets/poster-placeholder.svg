@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" fill="none">
+  <rect width="1280" height="720" fill="#1C1917"/>
+  <rect x="120" y="120" width="1040" height="480" fill="#292524" rx="24"/>
+  <rect x="480" y="290" width="320" height="140" fill="#3F3F40" rx="70"/>
+  <polygon points="560,345 560,395 640,370" fill="#D97706"/>
+  <text x="640" y="660" font-family="system-ui" font-size="20" fill="#9CA3AF" text-anchor="middle">Replace with demo-video.mp4</text>
+</svg>
