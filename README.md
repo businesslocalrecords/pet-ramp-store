@@ -25,30 +25,86 @@ Built with **React 19 + Vite + Tailwind CSS v4**, powered by the **Shopify Store
 
 ```bash
 npm install
-cp .env.example .env      # then fill in your Shopify credentials
-npm run dev               # http://localhost:5173
-npm run build             # production bundle in dist/
-npm run lint              # oxlint
+cp .env.example .env.local     # then fill in your Shopify credentials
+npm run shopify:seed:dry       # preview the catalog (no credentials needed)
+npm run shopify:seed           # create the catalog in Shopify
+npm run dev                    # http://localhost:5173
+npm run build                  # production bundle in dist/
+npm run lint                   # oxlint
 ```
 
 ## Shopify Setup
 
-1. **Create a storefront access token**
-   Shopify Admin → Settings → Apps and sales channels → Develop apps → Create app
-   → Storefront API → scopes: `unauthenticated_read_products`, `unauthenticated_read_checkout`
+### 1. The two different tokens (this trips everyone up)
 
-2. **Create two products** with these exact handles:
-   - `dog-car-ramp` — the ramp (add variants for the Compact and Extended sizes)
-   - `non-slip-mat` — the bundle upsell
+| Token | Variable | Used for | Can create products? |
+|-------|----------|----------|---------------------|
+| **Storefront API** | `VITE_SHOPIFY_STOREFRONT_TOKEN` (32-char hex) | React frontend — reads products, writes carts | **No** — read-only |
+| **Admin API** | `SHOPIFY_ADMIN_ACCESS_TOKEN` (`shpat_…`) | `scripts/shopify-seed.mjs` | **Yes** |
 
-3. **Add variables to `.env`**
+The Storefront token in `.env.local` cannot create products; that API is
+read-only by design. To generate the Admin token:
 
+1. Shopify Admin → **Settings** → **Apps and sales channels**
+2. → **Develop apps** (enable custom app development if prompted)
+3. → **Create an app** → name it e.g. "PawGrip Catalog Seeder"
+4. → **Configure** → **Admin API integration** → add scopes:
+   `read_products`, `write_products`, `read_collections`, `write_collections`,
+   `read_inventory`, `write_inventory`, `read_publications`,
+   `write_publications`, `read_locations`, `write_locations`
+5. → **Save** → **Install app** → confirm
+6. → **API credentials** → reveal **Admin API access token** → copy it
+   *(shown only once)*
+7. Add to `.env.local`:
    ```env
-   VITE_SHOPIFY_STOREFRONT_DOMAIN=your-store.myshopify.com
-   VITE_SHOPIFY_STOREFRONT_TOKEN=shpat_xxxx
+   SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxxxxxxxxxxxxxxx
    ```
 
-4. Cart ID is persisted to `localStorage` under `pet_ramp_cart_id`, so carts survive reloads.
+### 2. Create the catalog
+
+```bash
+npm run shopify:seed:dry    # preview, no credentials needed, no writes
+npm run shopify:seed        # create everything (needs the Admin token)
+npm run shopify:verify      # re-check what exists in the store
+```
+
+The seeder is idempotent — it matches on handle, so running it twice updates
+rather than duplicates. Created IDs land in `scripts/seed-output.json`.
+
+### 3. Products created
+
+| Handle | Title | Price | Compare-at | Tag | Role |
+|--------|-------|-------|-----------|-----|------|
+| `premium-foldable-dog-car-ramp` | The Premium Foldable Dog Car Ramp | $79.99 | $139.99 | `hero-product` | Main funnel product |
+| `heavy-duty-traction-mat-upgrade-2-pack` | Heavy-Duty Traction Mat Upgrade (2-Pack) | $15.00 | $30.00 | `order-bump` | Pre-checkout bump |
+| `crash-tested-adjustable-car-safety-tether` | Crash-Tested Adjustable Car Safety Tether | $19.99 | $35.00 | `post-purchase-upsell` | Cart upsell |
+| `orthopedic-foam-bed-steps` | Orthopedic Foam Bed Steps | $65.00 | $99.00 | — | Home Mobility |
+| `advanced-hip-joint-soft-chews` | Advanced Hip & Joint Soft Chews | $29.99 | $45.00 | — | Joint Care (add Subscribe & Save) |
+
+Plus collections: **Car Mobility**, **Home Mobility**, **Joint Care**, and a
+hidden **Bumps** collection.
+
+**Pricing rationale:** the reference product (PetSafe Happy Ride) has an MSRP
+of $59.99. $79.99 / $139.99 (43% off) sits ~33% above that — defensible with
+the PawGrip Tread, 100-day guarantee and lifetime warranty — while leaving a
+~52% gross margin on the hero for ad spend.
+
+### 4. Before running PMax / Shopping ads
+
+The seeder cannot do these for you:
+
+- **Delete the default demo products.** Shopify seeds new stores with 15
+  snowboard/gift-card products. Unrelated inventory causes Merchant Center
+  disapproval.
+- **Upload product images** with a pure white (`#FFFFFF`) background.
+  GMC requires an image on every product. The hero's second image should be
+  an action shot of a dog walking up the ramp.
+- **Add Subscribe & Save** to `advanced-hip-joint-soft-chews` (Admin →
+  Products → the product → Selling plans). The Admin API requires an app-owned
+  selling plan group, which this script deliberately does not attempt.
+- **Fill in the business address and phone** in `src/components/Footer.tsx`
+  (currently `REPLACE_WITH_…` placeholders, flagged with a visible banner).
+
 
 ## Analytics (CPC Campaigns)
 
@@ -109,7 +165,12 @@ src/
 │   ├── shopify.ts              Storefront API (products + cart)
 │   ├── cart.tsx                CartProvider
 │   ├── cart-context.ts         cart context + useCart hook
-│   └── analytics.ts            GA4 / Google Ads / Meta Pixel
-├── pages/index.tsx             section assembly
-└── styles/globals.css          design tokens + animations
+│   ├── purchase-provider.tsx   shared purchase flow (one buy() for both CTAs)
+│   ├── purchase-context.ts     purchase context + usePurchase hook
+│   ├── offers.ts               tiers, prices, product handles, collections
+│   ├── dki.ts                  DKI params + attribution forwarding
+│   └── analytics.ts            GA4 / Google Ads / Meta Pixel + dataLayer
+└── scripts/
+    ├── shopify-seed.mjs        Admin API catalog seeder
+    └── seed-output.json        generated manifest of created IDs
 ```

@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "shopify:seed": "node scripts/shopify-seed.mjs",
+    "shopify:seed:dry": "node scripts/shopify-seed.mjs --dry-run",
+    "shopify:verify": "node scripts/shopify-seed.mjs --verify"
   },
   "dependencies": {
     "lucide-react": "^1.55.0",

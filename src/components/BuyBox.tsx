@@ -3,6 +3,7 @@ import { Star, Timer, Package, Lock } from 'lucide-react';
 import { usePurchase } from '../lib/purchase-context';
 import { TieredOfferSelector } from './TieredOfferSelector';
 import { OrderBump } from './OrderBump';
+import { TetherUpsell } from './TetherUpsell';
 import { TactileBuyButton } from './TactileBuyButton';
 import { TrustBlock } from './TrustBlock';
 
@@ -18,13 +19,19 @@ export const BuyBox: React.FC = () => {
     selectTier,
     bumpEnabled,
     setBumpEnabled,
+    bumpPrice,
+    showBump,
+    tetherUpsell,
+    setTetherUpsell,
+    tetherPrice,
+    showTetherUpsell,
     total,
     savingsPercent,
-    bumpPrice,
     loading,
     ready,
     rampVariants,
     matVariant,
+    tetherVariant,
     stock,
     buying,
     error,
@@ -78,12 +85,25 @@ export const BuyBox: React.FC = () => {
             disabled={rampVariants.length === 0}
           />
 
-          <OrderBump
-            matVariantId={matVariant?.id ?? null}
-            enabled={bumpEnabled}
-            onToggle={setBumpEnabled}
-            price={bumpPrice}
-          />
+          {/* Pre-checkout order bump — only when the mat is not already bundled */}
+          {showBump && (
+            <OrderBump
+              matVariantId={matVariant?.id ?? null}
+              enabled={bumpEnabled}
+              onToggle={setBumpEnabled}
+              price={bumpPrice}
+            />
+          )}
+
+          {/* Post-add-to-cart tether upsell — only when not already bundled */}
+          {showTetherUpsell && (
+            <TetherUpsell
+              available={Boolean(tetherVariant)}
+              enabled={tetherUpsell}
+              onToggle={setTetherUpsell}
+              price={tetherPrice}
+            />
+          )}
 
           {/* Summary */}
           <div className="flex items-center justify-between rounded-2xl bg-stone-50 px-4 py-3">
