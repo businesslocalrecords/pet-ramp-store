@@ -681,11 +681,32 @@ const COLLECTION_MEMBERSHIP = {
 
 const manifest = { createdAt: new Date().toISOString(), shop: SHOP_DOMAIN, products: {}, collections: {} };
 
+/**
+ * Prior run's manifest, if any.
+ *
+ * This is the seeder's idempotency mechanism. The Admin app in use does not
+ * have read_products, so the schema cannot be queried for existing products.
+ * Instead we remember the IDs we created last time: a product already in the
+ * manifest is UPDATED rather than created, and its variants are not rebuilt,
+ * so re-running never duplicates products or variants.
+ */
+let PRIOR = {};
+try {
+  PRIOR = JSON.parse(fs.readFileSync(OUTPUT_FILE, 'utf8'));
+} catch {
+  PRIOR = {};
+}
+
 async function seedProducts() {
-  log('\nâ”€â”€ Products â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
+  log('\n── Products ─────────────────────────────────────────────');
   for (const item of CATALOG) {
-    // Dry run makes no API calls, so it can run without credentials
-    const existing = DRY_RUN ? null : await findProductByHandle(item.handle);
+    const prior = PRIOR.products?.[item.key];
+    // Manifest takes priority: it is authoritative for IDs we created ourselves
+    const existing = prior?.id
+      ? { id: prior.id, title: item.title, handle: item.handle, status: 'ACTIVE' }
+      : DRY_RUN
+        ? null
+        : await findProductByHandle(item.handle);
 
     if (VERIFY_ONLY) {
       log(`  ${existing ? 'âœ“' : 'Â·'} ${item.handle}${existing ? `  (${existing.title})` : '  â€” not created yet'}`);
@@ -753,7 +774,14 @@ async function seedProducts() {
       } else {
         ok(`updated ${item.handle}`);
       }
-      manifest.products[item.key] = { handle: item.handle, exists: true, id: existing.id, updated: true };
+      manifest.products[item.key] = {
+        handle: item.handle,
+        exists: true,
+        id: existing.id,
+        updated: true,
+        variantsCreated: prior?.variantsCreated === true,
+        variantCount: prior?.variantCount ?? null,
+      };
     } else {
       // STEP 1 — create the product with its options.
       // The argument is `product`; `input` is a deprecated alias typed as the
@@ -779,7 +807,24 @@ async function seedProducts() {
       const created = data.productCreate.product;
       ok(`created ${created.handle} — ${created.title}`);
 
-      // STEP 2 — bulk-create the variants (price, stock, sku, cost)
+      // STEP 2 — bulk-create the variants (price, stock, sku, cost).
+      // Skipped when the manifest records variants from a previous run, so a
+      // re-run updates the product without appending a second set of variants.
+      if (prior?.variantsCreated) {
+        ok(`  variants already provisioned by an earlier run — skipping (${prior.variantCount ?? '?'} on record)`);
+        manifest.products[item.key] = {
+          handle: item.handle,
+          exists: true,
+          id: created.id,
+          price: item.price,
+          stock: item.inventoryQuantity,
+          variantsCreated: true,
+          variantCount: prior.variantCount,
+        };
+        continue;
+      }
+
+      let createdVariantCount = 0;
       try {
         const variantRes = await gql(
           `mutation productVariantsBulkCreate(
@@ -823,6 +868,7 @@ async function seedProducts() {
         } else {
           const n = variantRes.productVariantsBulkCreate?.productVariants?.length ?? 0;
           ok(`  added ${n} variant(s) with stock ${item.inventoryQuantity}`);
+          createdVariantCount = n;
         }
       } catch (err) {
         warn(`  variant creation failed: ${err.message}`);
@@ -835,6 +881,8 @@ async function seedProducts() {
         id: created.id,
         price: item.price,
         stock: item.inventoryQuantity,
+        variantsCreated: createdVariantCount > 0,
+        variantCount: createdVariantCount,
       };
     }
   }
