@@ -1,5 +1,6 @@
 import React from 'react';
 import { ShieldCheck, Plus, Car } from 'lucide-react';
+import { formatMoney } from '../lib/offers';
 
 interface TetherUpsellProps {
   /** Whether the live tether variant loaded from the storefront. */
@@ -39,7 +40,7 @@ export const TetherUpsell: React.FC<TetherUpsellProps> = ({
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-x-2">
             <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-widest text-white">
-              Add for ${price}
+              Add for ${formatMoney(price)}
             </span>
             <span className="text-[0.8125rem] font-bold text-stone-900">
               Crash-Tested Car Safety Tether

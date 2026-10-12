@@ -1,5 +1,6 @@
 import React from 'react';
 import { Loader2, Lock } from 'lucide-react';
+import { formatMoney } from '../lib/offers';
 
 interface TactileBuyButtonProps {
   label: string;
@@ -39,7 +40,7 @@ export const TactileBuyButton: React.FC<TactileBuyButtonProps> = ({
           <>
             <Lock className="h-4 w-4 opacity-90" aria-hidden="true" />
             <span className="text-base font-extrabold tracking-tight">
-              {label} &mdash; ${price}
+              {label} &mdash; ${formatMoney(price)}
             </span>
           </>
         )}

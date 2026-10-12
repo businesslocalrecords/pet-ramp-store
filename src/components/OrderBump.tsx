@@ -1,5 +1,6 @@
 import React from 'react';
 import { Plus, Gift } from 'lucide-react';
+import { formatMoney } from '../lib/offers';
 
 interface OrderBumpProps {
   /** Live mat variant ID from the Storefront API. */
@@ -49,7 +50,7 @@ export const OrderBump: React.FC<OrderBumpProps> = ({
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-x-2">
             <span className="rounded-md bg-red-600 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-widest text-white">
-              Add for ${price}
+              Add for ${formatMoney(price)}
             </span>
             <span className="text-[0.8125rem] font-bold text-stone-900">
               Yes! Add the Custom Non-Slip Mat

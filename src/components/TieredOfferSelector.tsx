@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check } from 'lucide-react';
-import { TIERS } from '../lib/offers';
+import { TIERS, money, formatMoney } from '../lib/offers';
 
 interface TieredOfferSelectorProps {
   selectedId: string;
@@ -23,7 +23,7 @@ export const TieredOfferSelector: React.FC<TieredOfferSelectorProps> = ({
 
       {TIERS.map((tier) => {
         const isActive = selectedId === tier.id;
-        const savings = tier.compareAt - tier.price;
+        const savings = money(tier.compareAt - tier.price);
 
         return (
           <label
@@ -67,9 +67,9 @@ export const TieredOfferSelector: React.FC<TieredOfferSelectorProps> = ({
 
             {/* Price */}
             <span className="shrink-0 text-right">
-              <span className="block text-[11px] text-stone-400 line-through">${tier.compareAt}</span>
-              <span className="block text-lg font-extrabold leading-tight text-stone-900">${tier.price}</span>
-              <span className="block text-[11px] font-bold text-emerald-600">Save ${savings}</span>
+              <span className="block text-[11px] text-stone-400 line-through">${formatMoney(tier.compareAt)}</span>
+              <span className="block text-lg font-extrabold leading-tight text-stone-900">${formatMoney(tier.price)}</span>
+              <span className="block text-[11px] font-bold text-emerald-600">Save ${formatMoney(savings)}</span>
             </span>
 
             {/* Overlapping pill badge */}

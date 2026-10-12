@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { usePurchase } from '../lib/purchase-context';
+import { formatMoney } from '../lib/offers';
 
 /**
  * Mobile-only sticky buy bar. Slides up once the shopper scrolls past the
@@ -31,8 +32,8 @@ export const StickyMobileBuyBar: React.FC = () => {
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-extrabold leading-none text-stone-900">${total}</span>
-            <span className="text-xs text-stone-400 line-through">${tier.compareAt}</span>
+            <span className="text-xl font-extrabold leading-none text-stone-900">${formatMoney(total)}</span>
+            <span className="text-xs text-stone-400 line-through">${formatMoney(tier.compareAt)}</span>
           </div>
           <p className="text-[11px] text-emerald-600">Ships free in 24 hours</p>
         </div>

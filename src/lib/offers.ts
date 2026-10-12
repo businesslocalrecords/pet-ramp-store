@@ -76,6 +76,26 @@ export function getTier(id: string): OfferTier {
 }
 
 /* --------------------------------------------------------------------------
+   Money helpers
+   -------------------------------------------------------------------------- */
+
+/**
+ * Rounds to whole cents.
+ *
+ * JS float arithmetic makes 139.99 - 79.99 evaluate to 60.000000000000014,
+ * which renders verbatim into prices and destroys trust in the offer. Every
+ * displayed amount goes through here.
+ */
+export function money(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/** Formats as a 2-decimal string, e.g. 79.9 -> "79.90". */
+export function formatMoney(value: number): string {
+  return money(value).toFixed(2);
+}
+
+/* --------------------------------------------------------------------------
    Shopify product handles — must match the slugs created in Shopify Admin.
    The seeder in scripts/shopify-seed.mjs creates exactly these handles.
    -------------------------------------------------------------------------- */

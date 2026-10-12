@@ -1,6 +1,7 @@
 import React from 'react';
 import { Star, Timer, Package, Lock } from 'lucide-react';
 import { usePurchase } from '../lib/purchase-context';
+import { money, formatMoney } from '../lib/offers';
 import { TieredOfferSelector } from './TieredOfferSelector';
 import { OrderBump } from './OrderBump';
 import { TetherUpsell } from './TetherUpsell';
@@ -15,6 +16,7 @@ import { TrustBlock } from './TrustBlock';
  */
 export const BuyBox: React.FC = () => {
   const {
+    tier,
     selectedId,
     selectTier,
     bumpEnabled,
@@ -26,7 +28,6 @@ export const BuyBox: React.FC = () => {
     tetherPrice,
     showTetherUpsell,
     total,
-    savingsPercent,
     loading,
     ready,
     rampVariants,
@@ -113,13 +114,13 @@ export const BuyBox: React.FC = () => {
                 <span className="ml-1 text-xs text-stone-400">(incl. mat)</span>
               )}
             </span>
-            <span className="text-xl font-extrabold text-stone-900">${total}</span>
+            <span className="text-xl font-extrabold text-stone-900">${formatMoney(total)}</span>
           </div>
 
           <TactileBuyButton
             label="Get My Ramp"
-            sublabel={`Save ${savingsPercent}% today · Free insured shipping · 30-day returns`}
-            price={total}
+            sublabel={`Save ${Math.round((1 - tier.price / tier.compareAt) * 100)}% today · Free insured shipping · 30-day returns`}
+            price={money(total)}
             loading={buying || loading}
             disabled={rampVariants.length === 0}
             onClick={buy}

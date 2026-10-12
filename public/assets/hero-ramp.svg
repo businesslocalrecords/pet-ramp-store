@@ -143,7 +143,7 @@
   <g transform="translate(300,600)">
     <path d="M0 100 L300 0" stroke="#FBBF24" stroke-width="3" stroke-dasharray="8 6"/>
     <path d="M0 100 A100 100 0 0 1 71 29" stroke="#D97706" stroke-width="2" fill="none"/>
-    <text x="20" y="70" font-family="system-ui" font-size="13" font-weight="700" fill="#D97706">Gentle 26° slope</text>
+    <text x="20" y="70" font-family="system-ui" font-size="13" font-weight="700" fill="#D97706">Gentle 26&#176; slope</text>
   </g>
 
   <!-- Weight capacity badge -->
@@ -152,6 +152,6 @@
     <circle cx="42" cy="36" r="22" fill="#ECFDF5"/>
     <path d="M42 22 L48 34 L60 35 L51 43 L53 55 L42 49 L31 55 L33 43 L24 35 L36 34 Z" fill="#059669"/>
     <text x="76" y="32" font-family="system-ui" font-size="14" font-weight="700" fill="#1C1917">250 lb Capacity</text>
-    <text x="76" y="52" font-family="system-ui" font-size="12" fill="#78716C">Tested & certified</text>
+    <text x="76" y="52" font-family="system-ui" font-size="12" fill="#78716C">Tested &amp; certified</text>
   </g>
 </svg>
